@@ -1,175 +1,169 @@
 
-# Patient Treatment — Card-grid v3 (L–Q form, A–C + R–U dashboard)
+# Patient Data — Mobile-First One-Row Viewer
+# ------------------------------------------
+# URL params: ?row=, ?id=&id_col=, ?lock=1
 
+import re
 import pandas as pd
 import streamlit as st
-import requests
 
-# ===== READ CONFIG =====
-DEFAULT_SHEET_ID = "1lKKAgJMcpIt2F6E2SJJJYCxybAV2l_Cli1Jb-LzlSkA"
-DEFAULT_GID = "0"
-DEFAULT_SHEET_CSV = f"https://docs.google.com/spreadsheets/d/{DEFAULT_SHEET_ID}/export?format=csv&gid={DEFAULT_GID}"
+DEFAULT_SHEET_CSV = "https://docs.google.com/spreadsheets/d/1lKKAgJMcpIt2F6E2SJJJYCxybAV2l_Cli1Jb-LzlSkA/export?format=csv&gid=0"
 
-# ===== WRITE CONFIG =====
-SUBMIT_ENDPOINT = st.secrets.get("SUBMIT_ENDPOINT", "")
-SUBMIT_SECRET   = st.secrets.get("SUBMIT_SECRET", "")
-TARGET_GID      = st.secrets.get("TARGET_GID", DEFAULT_GID)
-
-def get_query():
+def get_query_params() -> dict:
     try:
         return dict(st.query_params)
     except Exception:
-        return {k:(v[0] if isinstance(v, list) else v) for k,v in st.experimental_get_query_params().items()}
+        return {k: v[0] if isinstance(v, list) else v for k, v in st.experimental_get_query_params().items()}
 
 def coerce_int(x, default=None):
-    try: return int(str(x))
-    except Exception: return default
+    try:
+        return int(str(x))
+    except Exception:
+        return default
 
-@st.cache_data(show_spinner=False, ttl=120)
-def load_csv(url):
+def looks_like_image_url(x: str) -> bool:
+    if not isinstance(x, str):
+        return False
+    return bool(re.search(r"\.(png|jpg|jpeg|gif|webp)(\?.*)?$", x, re.IGNORECASE))
+
+@st.cache_data(show_spinner=False, ttl=300)
+def load_csv(url: str) -> pd.DataFrame:
     df = pd.read_csv(url)
     df.columns = [str(c) for c in df.columns]
     return df
 
-def not_found(msg):
-    st.error("❌ " + msg); st.stop()
+q_pre = get_query_params()
+LOCKED = str(q_pre.get("lock", "")).lower() in ("1", "true", "yes", "on")
+st.set_page_config(page_title="Patient data", layout="centered", initial_sidebar_state=("collapsed" if LOCKED else "auto"))
 
-# ===== Page / CSS =====
-q = get_query()
-LOCKED = str(q.get("lock","")).lower() in ("1","true","yes","on")
-VIEW   = (q.get("view") or "").lower()
+hide_css = "" if not LOCKED else '''
+[data-testid='stSidebar'] {display:none !important;}
+[data-testid='collapsedControl'] {display:none !important;}
+'''
 
-st.set_page_config(page_title="Patient Treatment", layout="centered",
-                   initial_sidebar_state=("collapsed" if LOCKED else "auto"))
+st.markdown(
+    '''
+    <style>
+      {hide_css}
+      .block-container {{padding-top: .25rem; padding-bottom: 1rem; max-width: 760px;}}
+      .kv-grid {{
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: .55rem;
+      }}
+      @media (max-width: 520px) {{
+        .kv-grid {{ grid-template-columns: 1fr; }}
+      }}
+      .kv-card {{
+        border: 1px solid #e5e7eb;
+        border-radius: .75rem;
+        padding: .65rem .75rem;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(0,0,0,.04);
+      }}
+      .kv-label {{ font-size: .82rem; color: #6b7280; margin-bottom: .25rem; line-height: 1.1; }}
+      .kv-value {{ font-size: 1.05rem; color: #111827; word-break: break-word; white-space: pre-wrap; line-height: 1.25; }}
+      .kv-img {{ width: 100%; height: auto; border-radius: .5rem; }}
+      header[data-testid="stHeader"] {{height: 0; visibility: hidden;}}
+      .small-cap {{ color:#6b7280; font-size:.85rem; margin-top:.5rem; }}
+    </style>
+    '''.format(hide_css=hide_css),
+    unsafe_allow_html=True,
+)
 
-hide_css = "" if not LOCKED else "[data-testid='stSidebar'] {display:none !important;} [data-testid='collapsedControl'] {display:none !important;}"
-css = '''
-<style>
-{HIDE}
-.block-container {{ padding-top:.5rem; padding-bottom:1rem; max-width: 940px; }}
-/* Card-grid styling (improved sizing for mobile) */
-.kv-grid {{ display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }}
-@media (max-width: 900px) {{ .kv-grid {{ grid-template-columns: repeat(2, 1fr); }} }}
-@media (max-width: 580px) {{ .kv-grid {{ grid-template-columns: 1fr; }} }}
-.kv-card {{ background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:14px 16px;
-           box-shadow:0 1px 3px rgba(0,0,0,.06);}}
-.kv-label {{ font-size:0.95rem; color:#6b7280; margin-bottom:4px; line-height:1.15; }}
-.kv-value {{ font-size:1.15rem; color:#111827; line-height:1.35; word-break:break-word; }}
-/* Reduce Streamlit header */
-header[data-testid="stHeader"] {{ height:0; visibility:hidden; }}
-.section-title {{ font-size:1.15rem; font-weight:600; margin: .75rem 0 .25rem 0; }}
-.hr {{ height:1px; background:#e5e7eb; margin:.5rem 0 1rem 0; }}
-</style>
-'''.replace("{HIDE}", hide_css)
-st.markdown(css, unsafe_allow_html=True)
+st.subheader("Patient data")
 
-def render_cards(row: pd.Series, columns: list, title: str):
-    st.markdown(f"<div class='section-title'>{title}</div>", unsafe_allow_html=True)
-    st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
-    cards = []
-    for c in columns:
-        val = row.get(c, "")
-        cards.append(
-            f"<div class='kv-card'><div class='kv-label'>{c}</div>"
-            f"<div class='kv-value'>{val}</div></div>"
-        )
-    st.markdown("<div class='kv-grid'>" + "\n".join(cards) + "</div>", unsafe_allow_html=True)
-
-# ===== Resolve data source =====
+# --- Determine sheet source ---
 if LOCKED:
     sheet_csv = DEFAULT_SHEET_CSV
 else:
-    sheet_csv = q.get("sheet") or DEFAULT_SHEET_CSV
-    if not LOCKED:
-        with st.sidebar:
-            st.caption("Data source (override)")
-            sheet_csv = st.text_input("Google Sheet CSV URL", value=sheet_csv) or sheet_csv
+    sheet_csv = q_pre.get("sheet") or DEFAULT_SHEET_CSV
+    sid = q_pre.get("sheet_id")
+    gid = q_pre.get("gid")
+    if (not q_pre.get("sheet")) and sid:
+        gid_val = gid if gid is not None else "0"
+        sheet_csv = f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv&gid={gid_val}"
 
-# ===== Load data =====
+if not LOCKED:
+    with st.sidebar:
+        st.caption("Data source (optional override)")
+        sheet_csv_input = st.text_input(
+            "Google Sheet CSV URL",
+            value=sheet_csv,
+            placeholder="https://.../export?format=csv&gid=0"
+        )
+        sheet_csv = sheet_csv_input or sheet_csv
+
+# --- Load data ---
 try:
     df = load_csv(sheet_csv)
 except Exception as e:
-    not_found("โหลดข้อมูลจาก CSV ไม่สำเร็จ: " + str(e))
+    st.error(f"โหลดข้อมูลจาก CSV ไม่สำเร็จ: {e}")
+    st.stop()
+
 if df.empty:
-    not_found("ไม่มีข้อมูลในชีต")
+    st.warning("ตารางว่าง (No data rows).")
+    st.stop()
 
-row_param = coerce_int(q.get("row"), None)
-selected_idx = 0 if row_param is None else row_param - 1
-if not (0 <= selected_idx < len(df)):
-    not_found(f"Row out of range (1–{len(df)})")
+# --- Resolve target row / id ---
+q = q_pre
+row_param = coerce_int(q.get("row"), default=None)
+id_value = q.get("id")
+id_col = q.get("id_col")
 
-# Column ranges
-cols_AK = df.columns[:11].tolist()       # A..K
-cols_AC = df.columns[:3].tolist()        # A..C
-cols_RU = df.columns[17:21].tolist()     # R..U  (18..21)
-
-# L..Q positions (12..17)
-def by_pos(df, pos):
-    i = pos - 1
-    return df.columns[i] if 0 <= i < len(df.columns) else None
-
-col_names_LQ = [by_pos(df, p) for p in range(12, 18)]
-if not all(col_names_LQ):
-    not_found("ชีตนี้ยังไม่มีคอลัมน์ครบถึง Q (อย่างน้อยต้องถึงคอลัมน์ Q)")
+selected_idx = None
+if id_value or id_col:
+    if not (id_value and id_col):
+        st.error("❌ ไม่พบข้อมูล: โปรดระบุทั้ง id= และ id_col=")
+        st.stop()
+    if id_col not in df.columns:
+        st.error(f"❌ ไม่พบคอลัมน์ '{id_col}' ในข้อมูล")
+        st.stop()
+    matches = df.index[df[id_col].astype(str) == str(id_value)].tolist()
+    if matches:
+        selected_idx = matches[0]
+    else:
+        st.error("❌ ไม่พบข้อมูลตาม ID ที่ระบุ")
+        st.stop()
+elif row_param is not None:
+    if 1 <= row_param <= len(df):
+        selected_idx = row_param - 1
+    else:
+        st.error(f"❌ ไม่พบข้อมูลในแถวที่ระบุ (row={row_param}) ข้อมูลมีช่วง 1–{len(df)}")
+        st.stop()
+else:
+    if LOCKED:
+        st.error("Locked mode ต้องระบุพารามิเตอร์ ?row= หรือ ?id= & id_col=")
+        st.stop()
+    selected_idx = 0
 
 row = df.iloc[selected_idx]
 
-# ===== BEFORE SUBMIT =====
-if VIEW != "dashboard":
-    # Patient information (A–K) as cards
-    render_cards(row, cols_AK, title="Patient information")
+priority = [c for c in ["HN","PatientID","Name","FullName","Triage","TriageScore","Age","Sex","VisitDate","ChiefComplaint","WaitingTime","Disposition"] if c in df.columns]
+others = [c for c in df.columns if c not in priority]
+ordered_cols = priority + others
 
-    # Patient treatment form (L–Q) — Yes/No
-    st.markdown("<div class='section-title'>Patient treatment</div>", unsafe_allow_html=True)
-    st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
+def escape_html(s: str) -> str:
+    return (s.replace("&","&amp;")
+             .replace("<","&lt;")
+             .replace(">","&gt;"))
 
-    YES_NO = ["Yes", "No"]
-    def yn_index(v):
-        return 0 if str(v).strip().lower() in ("yes","true","y","1") else 1
+# --- Render as responsive key–value cards ---
+cards = []
+for col in ordered_cols:
+    val = row[col]
+    disp = "" if pd.isna(val) else str(val)
+    if looks_like_image_url(disp):
+        content = f"<img class='kv-img' src='{disp}' alt='{col}'>"
+    else:
+        content = escape_html(disp)
+    cards.append(
+        "<div class='kv-card'>"
+        f"<div class='kv-label'>{escape_html(str(col))}</div>"
+        f"<div class='kv-value'>{content}</div>"
+        "</div>"
+    )
 
-    with st.form("treat_yesno_LQ", clear_on_submit=False):
-        new_vals = {}
-        for name in col_names_LQ:
-            current = row.get(name, "")
-            new_vals[name] = st.selectbox(name, YES_NO, index=yn_index(current))
-        submitted = st.form_submit_button("Submit")
-
-    if submitted:
-        if not SUBMIT_ENDPOINT or not SUBMIT_SECRET:
-            not_found("ยังไม่ได้ตั้งค่า SUBMIT_ENDPOINT หรือ SUBMIT_SECRET")
-
-        # Build {L..Q} keys for backend
-        letters = ["L","M","N","O","P","Q"]
-        payload_values = {}
-        for i, col_name in enumerate(col_names_LQ):
-            payload_values[letters[i]] = new_vals[col_name]
-
-        sheet_row = selected_idx + 2
-        payload = {
-            "secret": SUBMIT_SECRET,
-            "gid": TARGET_GID,
-            "sheet_row": sheet_row,
-            "values": payload_values
-        }
-        try:
-            r = requests.post(SUBMIT_ENDPOINT, json=payload, timeout=20)
-            r.raise_for_status(); resp = r.json()
-        except Exception as e:
-            not_found("ส่งข้อมูลไม่สำเร็จ: " + str(e))
-        if str(resp.get("status")).lower() != "ok":
-            not_found("บันทึกข้อมูลไม่สำเร็จ: " + str(resp))
-
-        st.cache_data.clear()
-        st.query_params.update({"row": str(selected_idx+1), "lock": "1", "view": "dashboard"})
-        st.success("บันทึกสำเร็จ → กำลังแสดงผล Dashboard")
-        st.rerun()
-
-# ===== AFTER SUBMIT (Dashboard) =====
-else:
-    try:
-        df2 = load_csv(sheet_csv)
-        dr = df2.iloc[selected_idx]
-    except Exception:
-        dr = row
-    cols_show = [c for c in (cols_AC + cols_RU) if c in dr.index]
-    render_cards(dr, cols_show, title="Patient information")
+grid_html = "<div class='kv-grid'>" + "\n".join(cards) + "</div>"
+st.markdown(grid_html, unsafe_allow_html=True)
+st.markdown(f"<div class='small-cap'>Showing row {selected_idx+1} of {len(df)}</div>", unsafe_allow_html=True)
