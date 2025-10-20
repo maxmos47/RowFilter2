@@ -1,18 +1,10 @@
+
 # Patient Data — Streamlit x Google Apps Script (Treatment L–Q Yes/No)
 # -------------------------------------------------
-# Changes per request:
-# • Remove the A–K summary block entirely.
-# • Rename the editor UI to "Treatment" (both unlocked and locked modes).
-# • Write back to Google Sheets via Google Apps Script Web App (HTTP), not gspread.
+# Update: After Submit -> show ONLY the dashboard for that row (no editor).
+#         In locked mode, the Treatment editor is hidden by default.
+#         You can re-enable it by adding ?edit=1 to the URL.
 #
-# Usage
-# - Provide the CSV export URL of your Google Sheet via ?sheet=... (or edit DEFAULT_SHEET_CSV).
-# - Provide the GAS Web App URL via secrets: st.secrets["gas_url"]  (or via query param ?gas=... in unlocked mode).
-# - Select row with ?row=1 (or use id & id_col).
-# - After Submit, the app reloads with lock=1 and shows the updated dashboard.
-#
-# Notes
-# - L..Q correspond to columns 12..17 (0-based index 11..16). We POST 6 values to GAS.
 import re
 import pandas as pd
 import requests
@@ -58,15 +50,11 @@ def gas_update_lq(gas_url: str, rownum: int, values_yes_no):
     r.raise_for_status()
     return r.json()
 
-def gas_get_lq(gas_url: str, rownum: int):
-    """GET current L..Q for the given row, if you want immediate consistency."""
-    r = requests.get(gas_url, params={"row": int(rownum)}, timeout=20)
-    r.raise_for_status()
-    return r.json()
-
 # --------------- Page setup ---------------
 q_pre = get_query_params()
 LOCKED = str(q_pre.get("lock", "")).lower() in ("1", "true", "yes", "on")
+ALLOW_EDIT_LOCKED = str(q_pre.get("edit", "")).lower() in ("1", "true", "yes", "on")
+
 st.set_page_config(page_title="Patient data", layout="centered", initial_sidebar_state=("collapsed" if LOCKED else "auto"))
 
 hide_css = "" if not LOCKED else """
@@ -193,45 +181,53 @@ def render_cards(ordered_cols):
     st.markdown(grid_html, unsafe_allow_html=True)
     st.markdown(f"<div class='small-cap'>Showing row {selected_idx+1} of {len(df)}</div>", unsafe_allow_html=True)
 
-# ---------------- Locked (read-only) view WITH inline "Treatment" edit ----------------
+# ---------------- Locked (read-only) view ----------------
 if LOCKED:
+    # Show ONLY the dashboard for this row.
     render_cards(ordered_cols)
 
-    with st.expander("Treatment", expanded=False):
-        lq_cols_locked = list(df.columns[11:17])  # L..Q
-        if len(lq_cols_locked) < 6:
-            st.info("ตารางนี้มีคอลัมน์ไม่ถึง Q — จะแสดงเท่าที่มี")
-        yes_no_options = ("Yes", "No")
-        default_vals = []
-        for c in lq_cols_locked:
-            raw = row[c]
-            default_vals.append("Yes" if str(raw).strip().lower() == "yes" else "No")
+    # Treatment editor in locked mode is hidden by default.
+    # Re-enable by adding ?edit=1 to URL when you want to allow edits.
+    if ALLOW_EDIT_LOCKED:
+        with st.expander("Treatment", expanded=False):
+            lq_cols_locked = list(df.columns[11:17])  # L..Q
+            if len(lq_cols_locked) < 6:
+                st.info("ตารางนี้มีคอลัมน์ไม่ถึง Q — จะแสดงเท่าที่มี")
+            yes_no_options = ("Yes", "No")
+            default_vals = []
+            for c in lq_cols_locked:
+                raw = row[c]
+                default_vals.append("Yes" if str(raw).strip().lower() == "yes" else "No")
 
-        with st.form("edit_lq_locked_form", clear_on_submit=False):
-            edits = []
-            for i, c in enumerate(lq_cols_locked):
-                sel = st.selectbox(
-                    f"{c} (Col {chr(76+i)})",
-                    yes_no_options,
-                    index=0 if default_vals[i] == "Yes" else 1,
-                    key=f"lq_locked_{i}"
-                )
-                edits.append(sel)
-            submit_locked = st.form_submit_button("Submit (บันทึกการเปลี่ยนแปลง)")
+            with st.form("edit_lq_locked_form", clear_on_submit=False):
+                edits = []
+                for i, c in enumerate(lq_cols_locked):
+                    sel = st.selectbox(
+                        f"{c} (Col {chr(76+i)})",
+                        yes_no_options,
+                        index=0 if default_vals[i] == "Yes" else 1,
+                        key=f"lq_locked_{i}"
+                    )
+                    edits.append(sel)
+                submit_locked = st.form_submit_button("Submit (บันทึกการเปลี่ยนแปลง)")
 
-        if submit_locked:
-            if not gas_url:
-                st.error("ยังไม่ได้ตั้งค่า Google Apps Script Web App URL (gas_url)")
-                st.stop()
-            try:
-                sheet_rownum = selected_idx + 2  # 1-based (with header)
-                values_to_write = list(edits) + [""] * (6 - len(edits))
-                res = gas_update_lq(gas_url, rownum=sheet_rownum, values_yes_no=values_to_write[:6])
-                st.success(f"บันทึกข้อมูลเรียบร้อย: {res.get('status', 'ok')}")
-                set_query_params(**{**q_pre, "lock": "1"})
-                st.rerun()
-            except Exception as e:
-                st.error(f"บันทึกไม่สำเร็จ: {e}")
+            if submit_locked:
+                gas_url = gas_url or st.secrets.get("gas_url")
+                if not gas_url:
+                    st.error("ยังไม่ได้ตั้งค่า Google Apps Script Web App URL (gas_url)")
+                    st.stop()
+                try:
+                    sheet_rownum = selected_idx + 2  # 1-based (with header)
+                    values_to_write = list(edits) + [""] * (6 - len(edits))
+                    _ = gas_update_lq(gas_url, rownum=sheet_rownum, values_yes_no=values_to_write[:6])
+                    st.success("บันทึกข้อมูลเรียบร้อย")
+                    # After submit: stay locked and HIDE editor (no edit=1)
+                    params = {**q_pre, "lock": "1"}
+                    params.pop("edit", None)
+                    set_query_params(**params)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"บันทึกไม่สำเร็จ: {e}")
 
     st.stop()
 
@@ -253,20 +249,21 @@ with st.form("edit_lq_form", clear_on_submit=False):
     submitted = st.form_submit_button("Submit (บันทึกการเปลี่ยนแปลง)")
 
 if submitted:
+    gas_url = gas_url or st.secrets.get("gas_url")
     if not gas_url:
         st.error("ยังไม่ได้ตั้งค่า Google Apps Script Web App URL (gas_url)")
         st.stop()
     try:
         sheet_rownum = selected_idx + 2
         values_to_write = list(current_vals) + [""] * (6 - len(current_vals))
-        res = gas_update_lq(gas_url, rownum=sheet_rownum, values_yes_no=values_to_write[:6])
-        st.success("บันทึกข้อมูลเรียบร้อย → กำลังโหลดแดชบอร์ดแบบล็อก")
-        set_query_params(**{**q_pre, "lock": "1"})
+        _ = gas_update_lq(gas_url, rownum=sheet_rownum, values_yes_no=values_to_write[:6])
+        st.success("บันทึกข้อมูลเรียบร้อย → แสดงแดชบอร์ดเฉพาะแถวนี้")
+        # After submit: lock view and HIDE editor (no edit=1)
+        params = {**q_pre, "lock": "1"}
+        params.pop("edit", None)
+        set_query_params(**params)
         st.rerun()
     except Exception as e:
         st.error(f"บันทึกไม่สำเร็จ: {e}")
 
-# Reference: show the full row (for context)
-st.markdown("---")
-st.markdown("**ข้อมูลทั้งหมดของแถวนี้**")
-render_cards(ordered_cols)
+# No extra reference blocks shown in unlocked after submit — the rerun goes to locked view.
