@@ -157,7 +157,7 @@ current_V = data.get("current_V", "")
 if mode == "view":
     # Final view: A-C, R-V (no form)
     render_kv_grid(df_AC_RV, title="Patient", cols=2)
-    st.success("Final view (no form).")
+    st.success("Triage เรียบร้อย")
     if st.button("Edit again (L–Q)"):
         set_query_params(row=str(row), mode="edit1")
         st.rerun()
