@@ -1,5 +1,5 @@
 
-# Patient Treatment Dashboard — A–K before submit, A–C + L–R after submit
+# Patient Treatment Card-grid Dashboard (Mobile-friendly)
 
 import pandas as pd
 import streamlit as st
@@ -42,16 +42,24 @@ hide_css = "" if not LOCKED else "[data-testid='stSidebar'] {display:none !impor
 css = '''
 <style>
 {HIDE}
-.block-container {padding-top:.5rem; padding-bottom:1rem; max-width:860px;}
-.dataframe {font-size:14px !important;}
-@media (max-width:600px) {
-  .dataframe {font-size:12px !important;}
-}
-.small-cap { color:#6b7280; font-size:.85rem; margin-top:.5rem; }
+.block-container {{padding-top:.5rem; padding-bottom:1rem; max-width:900px;}}
+.card-grid {{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-top:.5rem;}}
+.card {{background-color:#f9fafb; border-radius:12px; padding:12px 14px; box-shadow:0 1px 3px rgba(0,0,0,.08);}}
+.label {{font-size:0.85rem; color:#6b7280; margin-bottom:2px;}}
+.value {{font-size:1.05rem; font-weight:500; color:#111827; word-break:break-word;}}
+@media (max-width:600px) { .value {{font-size:1rem;}} .label {{font-size:0.8rem;}} }
 </style>
 '''.replace("{HIDE}", hide_css)
 st.markdown(css, unsafe_allow_html=True)
-st.subheader("Patient treatment")
+
+def render_cards(row, columns, title="Patient information"):
+    st.markdown(f"### {title}")
+    html = '<div class="card-grid">'
+    for c in columns:
+        val = row[c] if c in row.index else ""
+        html += f'<div class="card"><div class="label">{c}</div><div class="value">{val}</div></div>'
+    html += '</div>'
+    st.markdown(html, unsafe_allow_html=True)
 
 if LOCKED: sheet_csv = DEFAULT_SHEET_CSV
 else:
@@ -72,12 +80,10 @@ row_param = coerce_int(q.get("row"), None)
 selected_idx = 0 if row_param is None else row_param - 1
 if selected_idx < 0 or selected_idx >= len(df): not_found("Row out of range")
 
-# define columns
 cols_AK = df.columns[:11].tolist()
 cols_AC = df.columns[:3].tolist()
-cols_LR = df.columns[11:18].tolist()  # 12th–18th (L–R)
+cols_LR = df.columns[11:18].tolist()
 
-# identify L,M,N
 def get_col(df,pos): 
     i=pos-1
     return df.columns[i] if 0<=i<len(df.columns) else None
@@ -89,18 +95,10 @@ YES_NO = ["Yes","No"]
 def yn_index(v):
     return 0 if str(v).strip().lower() in ("yes","true","y","1") else 1
 
-def render_table(dr, columns):
-    subset = dr[columns] if all(c in dr.index for c in columns) else dr
-    st.dataframe(subset.to_frame().T, use_container_width=True)
-
 if VIEW != "dashboard":
-    # show A–K first
-    st.write("**Patient information (A–K)**")
-    render_table(row, cols_AK)
-
-    # form section
-    st.write("**Patient treatment**")
+    render_cards(row, cols_AK, title="Patient information")
     with st.form("edit_yesno", clear_on_submit=False):
+        st.markdown("### Patient treatment")
         new_L = st.selectbox(col_L, YES_NO, index=yn_index(row[col_L]))
         new_M = st.selectbox(col_M, YES_NO, index=yn_index(row[col_M]))
         new_N = st.selectbox(col_N, YES_NO, index=yn_index(row[col_N]))
@@ -119,14 +117,11 @@ if VIEW != "dashboard":
         st.query_params.update({"row":str(selected_idx+1),"lock":"1","view":"dashboard"})
         st.success("บันทึกสำเร็จ → กำลังแสดงผล Dashboard")
         st.rerun()
-
 else:
-    # dashboard: A–C + L–R
-    st.write("### Patient summary (A–C, L–R)")
+    st.markdown("### Patient information")
     try:
         df2 = load_csv(sheet_csv)
         dr = df2.iloc[selected_idx]
-        cols_show = [c for c in cols_AC+cols_LR if c in dr.index]
-        render_table(dr, cols_show)
+        render_cards(dr, cols_AC+cols_LR, title="Patient information")
     except Exception:
-        render_table(row, cols_AC+cols_LR)
+        render_cards(row, cols_AC+cols_LR, title="Patient information")
