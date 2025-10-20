@@ -1,29 +1,22 @@
-# Patient Data — Edit L–Q with Yes/No, then lock
+# Patient Data — Streamlit x Google Apps Script (Treatment L–Q Yes/No)
 # -------------------------------------------------
-# Changes requested:
-# • Remove the "ข้อมูลสรุป (Cols A–K)" preview block.
-# • Rename edit form/expander title from "แก้ไขคอลัมน์ L–Q เป็น Yes/No" to "Treatment".
+# Changes per request:
+# • Remove the A–K summary block entirely.
+# • Rename the editor UI to "Treatment" (both unlocked and locked modes).
+# • Write back to Google Sheets via Google Apps Script Web App (HTTP), not gspread.
 #
-# What this app does
-# • Shows a mobile-first dashboard of a selected row.
-# • Supports editing Columns L–Q (Yes/No) either in unlocked mode via a form,
-#   or in locked mode via an expander called "Treatment".
-# • On Submit, writes back to Google Sheets via gspread, then reloads in lock mode.
+# Usage
+# - Provide the CSV export URL of your Google Sheet via ?sheet=... (or edit DEFAULT_SHEET_CSV).
+# - Provide the GAS Web App URL via secrets: st.secrets["gas_url"]  (or via query param ?gas=... in unlocked mode).
+# - Select row with ?row=1 (or use id & id_col).
+# - After Submit, the app reloads with lock=1 and shows the updated dashboard.
 #
-# Requirements
-#   - See requirements.txt generated alongside this file.
-#
+# Notes
+# - L..Q correspond to columns 12..17 (0-based index 11..16). We POST 6 values to GAS.
 import re
 import pandas as pd
+import requests
 import streamlit as st
-
-# --- Google Sheets write helpers ---
-try:
-    import gspread
-    from google.oauth2.service_account import Credentials
-    HAS_GSPREAD = True
-except Exception:
-    HAS_GSPREAD = False
 
 DEFAULT_SHEET_CSV = "https://docs.google.com/spreadsheets/d/1lKKAgJMcpIt2F6E2SJJJYCxybAV2l_Cli1Jb-LzlSkA/export?format=csv&gid=0"
 
@@ -33,11 +26,9 @@ def get_query_params() -> dict:
     try:
         return dict(st.query_params)
     except Exception:
-        # Legacy fallback
         return {k: v[0] if isinstance(v, list) else v for k, v in st.experimental_get_query_params().items()}
 
 def set_query_params(**kwargs):
-    # Compatibility for old/new Streamlit
     try:
         st.query_params.update(kwargs)
     except Exception:
@@ -60,53 +51,31 @@ def load_csv(url: str) -> pd.DataFrame:
     df.columns = [str(c) for c in df.columns]
     return df
 
-def parse_sid_gid_from_csv_url(csv_url: str):
-    """Try to pull sheetId (sid) and gid from a Google Sheets CSV export URL."""
-    m = re.search(r"/spreadsheets/d/([\w-]+)/export\?", csv_url)
-    sid = m.group(1) if m else None
-    mg = re.search(r"[?&]gid=(\d+)", csv_url)
-    gid = mg.group(1) if mg else None
-    return sid, gid
+def gas_update_lq(gas_url: str, rownum: int, values_yes_no):
+    """POST to GAS Web App to update columns L..Q for the given 1-based row."""
+    payload = {"row": int(rownum), "values": list(values_yes_no)}
+    r = requests.post(gas_url, json=payload, timeout=20)
+    r.raise_for_status()
+    return r.json()
 
-def gspread_client_from_secrets():
-    if not HAS_GSPREAD:
-        raise RuntimeError("gspread is not installed. Add it to requirements.txt")
-    svc = st.secrets.get("gcp_service_account")
-    if not svc:
-        raise RuntimeError("Missing st.secrets['gcp_service_account'] with a Service Account JSON")
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive.readonly",
-    ]
-    creds = Credentials.from_service_account_info(svc, scopes=scopes)
-    return gspread.authorize(creds)
-
-def write_L_to_Q(sid: str, gid: int, rownum: int, values_yes_no):
-    """Write 6 Yes/No values into Columns L–Q in the given 1-based row number.
-    values_yes_no: list[str] length 6
-    """
-    gc = gspread_client_from_secrets()
-    sh = gc.open_by_key(sid)
-    ws = sh.get_worksheet_by_id(gid)
-    if ws is None:
-        raise RuntimeError(f"Cannot open worksheet gid={gid}")
-    # Range L..Q
-    col_start, col_end = "L", "Q"
-    rng = f"{col_start}{rownum}:{col_end}{rownum}"
-    ws.update(rng, [values_yes_no])
+def gas_get_lq(gas_url: str, rownum: int):
+    """GET current L..Q for the given row, if you want immediate consistency."""
+    r = requests.get(gas_url, params={"row": int(rownum)}, timeout=20)
+    r.raise_for_status()
+    return r.json()
 
 # --------------- Page setup ---------------
 q_pre = get_query_params()
 LOCKED = str(q_pre.get("lock", "")).lower() in ("1", "true", "yes", "on")
 st.set_page_config(page_title="Patient data", layout="centered", initial_sidebar_state=("collapsed" if LOCKED else "auto"))
 
-hide_css = "" if not LOCKED else '''
+hide_css = "" if not LOCKED else """
 [data-testid='stSidebar'] {display:none !important;}
 [data-testid='collapsedControl'] {display:none !important;}
-'''
+"""
 
 st.markdown(
-    '''
+    """
     <style>
       {hide_css}
       .block-container {{padding-top: .25rem; padding-bottom: 1rem; max-width: 760px;}}
@@ -120,32 +89,35 @@ st.markdown(
       .small-cap {{ color:#6b7280; font-size:.85rem; margin-top:.5rem; }}
       .muted {{ color: #6b7280; font-size: .9rem; }}
     </style>
-    '''.format(hide_css=hide_css),
+    """.format(hide_css=hide_css),
     unsafe_allow_html=True,
 )
 
 st.subheader("Patient data")
 
-# --- Determine sheet source ---
+# --- Determine data source & GAS URL ---
 if LOCKED:
     sheet_csv = DEFAULT_SHEET_CSV
 else:
     sheet_csv = q_pre.get("sheet") or DEFAULT_SHEET_CSV
-    sid = q_pre.get("sid")
-    gid = q_pre.get("gid")
-    if (not q_pre.get("sheet")) and q_pre.get("sid"):
-        gid_val = gid if gid is not None else "0"
-        sheet_csv = f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv&gid={gid_val}"
+
+gas_url = st.secrets.get("gas_url") or q_pre.get("gas")
 
 if not LOCKED:
     with st.sidebar:
-        st.caption("Data source (optional override)")
+        st.caption("Data/API settings")
         sheet_csv_input = st.text_input(
             "Google Sheet CSV URL",
             value=sheet_csv,
             placeholder="https://.../export?format=csv&gid=0"
         )
+        gas_url_input = st.text_input(
+            "Google Apps Script Web App URL (exec)",
+            value=gas_url or "",
+            placeholder="https://script.google.com/macros/s/XXXXX/exec"
+        )
         sheet_csv = sheet_csv_input or sheet_csv
+        gas_url = gas_url_input or gas_url
 
 # --- Load data ---
 try:
@@ -221,11 +193,10 @@ def render_cards(ordered_cols):
     st.markdown(grid_html, unsafe_allow_html=True)
     st.markdown(f"<div class='small-cap'>Showing row {selected_idx+1} of {len(df)}</div>", unsafe_allow_html=True)
 
-# ---------------- Locked (read-only) view WITH inline edit ----------------
+# ---------------- Locked (read-only) view WITH inline "Treatment" edit ----------------
 if LOCKED:
     render_cards(ordered_cols)
 
-    # --- Inline editing (L–Q) in locked mode ---
     with st.expander("Treatment", expanded=False):
         lq_cols_locked = list(df.columns[11:17])  # L..Q
         if len(lq_cols_locked) < 6:
@@ -249,24 +220,14 @@ if LOCKED:
             submit_locked = st.form_submit_button("Submit (บันทึกการเปลี่ยนแปลง)")
 
         if submit_locked:
-            sid_l = q_pre.get("sid")
-            gid_l = q_pre.get("gid")
-            if (not sid_l) or (not gid_l):
-                parsed_sid, parsed_gid = parse_sid_gid_from_csv_url(sheet_csv)
-                sid_l = sid_l or parsed_sid
-                gid_l = gid_l or parsed_gid
-
-            if not sid_l or not gid_l:
-                st.error("ไม่พบ sid/gid ของชีทสำหรับการเขียน โปรดระบุ ?sid= และ ?gid= หรือใช้ CSV URL ของ Google Sheets")
+            if not gas_url:
+                st.error("ยังไม่ได้ตั้งค่า Google Apps Script Web App URL (gas_url)")
                 st.stop()
-
             try:
-                if not HAS_GSPREAD:
-                    raise RuntimeError("ไม่พบไลบรารี gspread โปรดเพิ่มใน requirements.txt")
                 sheet_rownum = selected_idx + 2  # 1-based (with header)
                 values_to_write = list(edits) + [""] * (6 - len(edits))
-                write_L_to_Q(sid=sid_l, gid=int(gid_l), rownum=sheet_rownum, values_yes_no=values_to_write[:6])
-                st.success("บันทึกข้อมูลเรียบร้อย")
+                res = gas_update_lq(gas_url, rownum=sheet_rownum, values_yes_no=values_to_write[:6])
+                st.success(f"บันทึกข้อมูลเรียบร้อย: {res.get('status', 'ok')}")
                 set_query_params(**{**q_pre, "lock": "1"})
                 st.rerun()
             except Exception as e:
@@ -292,30 +253,20 @@ with st.form("edit_lq_form", clear_on_submit=False):
     submitted = st.form_submit_button("Submit (บันทึกการเปลี่ยนแปลง)")
 
 if submitted:
-    sid = q_pre.get("sid")
-    gid = q_pre.get("gid")
-    if (not sid) or (not gid):
-        parsed_sid, parsed_gid = parse_sid_gid_from_csv_url(sheet_csv)
-        sid = sid or parsed_sid
-        gid = gid or parsed_gid
-
-    if not sid or not gid:
-        st.error("ไม่พบ sid/gid ของชีทสำหรับการเขียน โปรดระบุ ?sid= และ ?gid= หรือใช้ CSV URL ของ Google Sheets")
+    if not gas_url:
+        st.error("ยังไม่ได้ตั้งค่า Google Apps Script Web App URL (gas_url)")
         st.stop()
-
     try:
-        if not HAS_GSPREAD:
-            raise RuntimeError("ไม่พบไลบรารี gspread โปรดเพิ่มใน requirements.txt")
         sheet_rownum = selected_idx + 2
         values_to_write = list(current_vals) + [""] * (6 - len(current_vals))
-        write_L_to_Q(sid=sid, gid=int(gid), rownum=sheet_rownum, values_yes_no=values_to_write[:6])
+        res = gas_update_lq(gas_url, rownum=sheet_rownum, values_yes_no=values_to_write[:6])
         st.success("บันทึกข้อมูลเรียบร้อย → กำลังโหลดแดชบอร์ดแบบล็อก")
         set_query_params(**{**q_pre, "lock": "1"})
         st.rerun()
     except Exception as e:
         st.error(f"บันทึกไม่สำเร็จ: {e}")
 
-# After form (not submitted), show full cards for reference
+# Reference: show the full row (for context)
 st.markdown("---")
 st.markdown("**ข้อมูลทั้งหมดของแถวนี้**")
 render_cards(ordered_cols)
