@@ -1,27 +1,35 @@
 
-# Patient Treatment — Card-grid v3
+# ⚡ Fast Submit Template (Streamlit + GAS)
 
-## What’s new
-- Form edits **L–Q** (6 fields) as **Yes/No**
-- **Patient information** uses the same card-grid layout before/after submit
-  - Before submit: shows **A–K**
-  - After submit: shows **A–C + R–U** (no group labels shown)
-- Mobile-friendly fonts and spacing
+- GAS caches header (120s) and returns the **next screen data** in each POST response.
+- Streamlit renders the next step **inline** after submit (no extra GET / no rerun).
+- Result: much faster UX after each submit.
 
-## Setup
-1) Deploy `apps_script_webapp.gs` as a Web App → copy `/exec` URL
-2) Create `.streamlit/secrets.toml`:
+## Files
+- `Code.gs` — Google Apps Script backend (Web App)
+- `app_fast_submit.py` — Streamlit frontend
+- `requirements.txt`
+
+## Deploy GAS
+1. Open https://script.google.com/ → New project
+2. Paste `Code.gs`
+3. Set `SHEET_ID` (already set to the ID you provided)
+4. (Optional) set `TOKEN` and pass it from Streamlit secrets
+5. Deploy → Web app → Execute as: **Me**; Who has access: **Anyone with the link** (or your domain)
+
+## Streamlit secrets
 ```
-SUBMIT_ENDPOINT = "https://script.google.com/macros/s/XXXX/exec"
-SUBMIT_SECRET   = "CHANGE_THIS_SECRET"
-TARGET_GID      = "0"
-```
-3) Run:
-```
-pip install -r requirements.txt
-streamlit run streamlit_app.py
+[gas]
+webapp_url = "https://script.google.com/macros/s/AKfycb.../exec"
+# token = "MY_SHARED_SECRET"
 ```
 
-## Usage
-- Edit/preview: `?row=5`
-- After submit → auto redirects to `?row=5&lock=1&view=dashboard`
+## Run
+```
+streamlit run app_fast_submit.py
+```
+
+## URL
+- Start: `?row=1&mode=edit1` → A–K + L–Q (Yes/No)
+- Submit → inline A–C, R–U + V (Priority 1/2/3)
+- Submit → inline final A–C, R–V (no form)

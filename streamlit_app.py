@@ -4,12 +4,11 @@ import pandas as pd
 import requests
 from typing import Dict, List
 
-st.set_page_config(page_title="Patient Dashboard", page_icon="🩺", layout="centered")
+st.set_page_config(page_title="Row Dashboard (fast Submit)", page_icon="⚡", layout="centered")
 
 # =========================
-# CONFIG: GAS Web App URL
+# CONFIG (.streamlit/secrets.toml)
 # =========================
-# Put your deployed Google Apps Script Web App URL in .streamlit/secrets.toml
 # [gas]
 # webapp_url = "https://script.google.com/macros/s/AKfycb.../exec"
 # token = "MY_SHARED_SECRET"     # (optional, only if you set TOKEN in GAS)
@@ -20,7 +19,7 @@ ALLOWED_V = ["Priority 1", "Priority 2", "Priority 3"]
 YN = ["Yes", "No"]
 
 # =========================
-# Helpers for query params
+# Helpers
 # =========================
 def get_query_params():
     try:
@@ -36,11 +35,8 @@ def set_query_params(**kwargs):
     except Exception:
         st.experimental_set_query_params(**kwargs)
 
-# =========================
-# GAS calls
-# =========================
-def gas_get_row(row: int) -> dict:
-    params = {"action": "get", "row": str(row)}
+def gas_get_row(row: int, mode: str) -> dict:
+    params = {"action": "get", "row": str(row), "mode": mode}
     if TOKEN:
         params["token"] = TOKEN
     r = requests.get(GAS_WEBAPP_URL, params=params, timeout=25)
@@ -48,7 +44,6 @@ def gas_get_row(row: int) -> dict:
     return r.json()
 
 def gas_update_lq(row: int, lq_values: Dict[str, str]) -> dict:
-    # Send JSON as a form field
     payload = {"action": "update_lq", "row": str(row), "lq": pd.Series(lq_values).to_json()}
     if TOKEN:
         payload["token"] = TOKEN
@@ -64,9 +59,7 @@ def gas_update_v(row: int, v_value: str) -> dict:
     r.raise_for_status()
     return r.json()
 
-# =========================
 # Card UI (mobile-friendly)
-# =========================
 st.markdown("""
 <style>
 .kv-card{border:1px solid #e5e7eb;padding:12px;border-radius:14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,0.06);background:#fff;}
@@ -79,7 +72,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def _pairs_from_row(df_one_row: pd.DataFrame) -> List[tuple[str, str]]:
+def _pairs_from_row(df_one_row: pd.DataFrame):
     s = df_one_row.iloc[0]
     pairs = []
     for col in df_one_row.columns:
@@ -110,9 +103,9 @@ def render_kv_grid(df_one_row: pd.DataFrame, title: str = "", cols: int = 2):
                 )
 
 # =========================
-# Main UI
+# Main
 # =========================
-st.markdown("### 🩺 Patient Information")
+st.markdown("### ⚡ Fast Row Dashboard — L–Q → V (no extra GET after submit)")
 
 if not GAS_WEBAPP_URL:
     st.error("Missing GAS web app URL. Add to secrets:\n\n[gas]\nwebapp_url = \"https://script.google.com/macros/s/XXX/exec\"")
@@ -120,7 +113,7 @@ if not GAS_WEBAPP_URL:
 
 qp = get_query_params()
 row_str = qp.get("row", "1")
-mode = qp.get("mode", "edit1")  # "edit1" -> first phase (L-Q); "edit2" -> second phase (V); "view" -> final
+mode = qp.get("mode", "edit1")  # "edit1" (A–K + L–Q form) -> "edit2" (A–C,R–U + V form) -> "view" (A–C,R–V)
 
 try:
     row = int(row_str)
@@ -129,9 +122,9 @@ try:
 except ValueError:
     row = 1
 
-# Fetch the row via GAS
+# Initial load via GET according to mode
 try:
-    data = gas_get_row(row=row)
+    data = gas_get_row(row=row, mode=mode)
 except Exception as e:
     st.error(f"Failed to fetch row via GAS: {e}")
     st.stop()
@@ -140,58 +133,49 @@ if data.get("status") != "ok":
     st.error(f"GAS error: {data}")
     st.stop()
 
-# Build DataFrames from GAS response
-df_AK = pd.DataFrame([data.get("A_K", {})])
-df_AC_RU = pd.DataFrame([data.get("A_C_R_U", {})])
-df_AC_RV = pd.DataFrame([data.get("A_C_R_V", {})])
-max_row = data.get("max_rows", 1)
-
-# L-Q info
-headers_LQ = data.get("headers_LQ", ["L","M","N","O","P","Q"])
-current_LQ = data.get("current_LQ", [])  # list of Yes/No in same order
-current_V = data.get("current_V", "")
-
-# =========================
-# Modes
-# =========================
+# Mode handling
 if mode == "view":
-    # Final view: A-C, R-V (no form)
-    render_kv_grid(df_AC_RV, title="Patient", cols=2)
-    st.success("Triage เรียบร้อย")
+    df_AC_RV = pd.DataFrame([data.get("A_C_R_V", {})])
+    render_kv_grid(df_AC_RV, title="Selected Row (A–C, R–V)", cols=2)
+    st.success("Final view (no form).")
     if st.button("Edit again (L–Q)"):
         set_query_params(row=str(row), mode="edit1")
         st.rerun()
 
 elif mode == "edit2":
-    # After first submit: show A–C, R–U and form for V
-    render_kv_grid(df_AC_RU, title="Patient", cols=2)
-    st.markdown("#### Secondary Triage")
+    # Show A–C, R–U and inline form for V
+    df_AC_RU = pd.DataFrame([data.get("A_C_R_U", {})])
+    render_kv_grid(df_AC_RU, title="Selected Row (A–C, R–U)", cols=2)
+
+    current_V = data.get("current_V", "")
     idx = ALLOWED_V.index(current_V) if current_V in ALLOWED_V else 0
     with st.form("form_v", border=True):
-        v_value = st.selectbox("SORT Triage", ALLOWED_V, index=idx)
-        submitted = st.form_submit_button("Submit")
-        if submitted:
+        v_value = st.selectbox("Select Priority (Column V)", ALLOWED_V, index=idx)
+        if st.form_submit_button("Submit"):
             try:
                 res = gas_update_v(row=row, v_value=v_value)
                 if res.get("status") == "ok":
-                    set_query_params(row=str(row), mode="view")
-                    st.rerun()
+                    final = res.get("final", {})
+                    df_AC_RV = pd.DataFrame([final.get("A_C_R_V", {})])
+                    render_kv_grid(df_AC_RV, title="Selected Row (A–C, R–V)", cols=2)
+                    st.success("Saved. Final view (no form).")
                 else:
                     st.error(f"Update V failed: {res}")
             except Exception as e:
                 st.error(f"Failed to update V via GAS: {e}")
 
 else:
-    # edit1 (default): show A–K + form for L–Q (Yes/No checkboxes)
-    render_kv_grid(df_AK, title="Patient", cols=2)
+    # edit1: A–K + L–Q checkboxes
+    df_AK = pd.DataFrame([data.get("A_K", {})])
+    render_kv_grid(df_AK, title="Selected Row (A–K)", cols=2)
 
-    st.markdown("#### Treatment")
-    # We will show checkboxes in two columns
+    headers_LQ = data.get("headers_LQ", ["L","M","N","O","P","Q"])
+    current_LQ = data.get("current_LQ", [])
+    curr_vals = current_LQ if current_LQ and len(current_LQ) == 6 else ["No"] * 6
+
+    st.markdown("#### Set **Columns L–Q** (Yes / No)")
     l_col, r_col = st.columns(2)
     selections = {}
-
-    # Ensure we have values for 6 columns
-    curr_vals = current_LQ if current_LQ and len(current_LQ) == 6 else ["No"] * 6
 
     with st.form("form_lq", border=True):
         with l_col:
@@ -205,14 +189,46 @@ else:
                 chk = st.checkbox(f"{label}", value=default)
                 selections[label] = "Yes" if chk else "No"
 
-        submitted = st.form_submit_button("Submit")
-        if submitted:
+        if st.form_submit_button("Submit"):
             try:
                 res = gas_update_lq(row=row, lq_values=selections)
                 if res.get("status") == "ok":
-                    set_query_params(row=str(row), mode="edit2")
-                    st.rerun()
+                    # Inline next screen: show A–C, R–U + form V (no rerun/no GET)
+                    nxt = res.get("next", {})
+                    df_AC_RU = pd.DataFrame([nxt.get("A_C_R_U", {})])
+                    render_kv_grid(df_AC_RU, title="Selected Row (A–C, R–U)", cols=2)
+
+                    current_V = nxt.get("current_V", "")
+                    idx = ALLOWED_V.index(current_V) if current_V in ALLOWED_V else 0
+                    with st.form("form_v_inline", border=True):
+                        v_value = st.selectbox("Select Priority (Column V)", ALLOWED_V, index=idx)
+                        if st.form_submit_button("Submit"):
+                            res2 = gas_update_v(row=row, v_value=v_value)
+                            if res2.get("status") == "ok":
+                                final = res2.get("final", {})
+                                df_AC_RV = pd.DataFrame([final.get("A_C_R_V", {})])
+                                render_kv_grid(df_AC_RV, title="Selected Row (A–C, R–V)", cols=2)
+                                st.success("Saved. Final view (no form).")
+                            else:
+                                st.error(f"Update V failed: {res2}")
                 else:
                     st.error(f"Update L–Q failed: {res}")
             except Exception as e:
                 st.error(f"Failed to update L–Q via GAS: {e}")
+
+# Quick row navigation
+with st.expander("Quick row navigation", expanded=False):
+    col1, col2 = st.columns(2)
+    with col1:
+        new_row = st.number_input("Go to row (1-based, data row under header)", min_value=1, value=row, step=1)
+    with col2:
+        if st.button("Go"):
+            set_query_params(row=str(new_row), mode="edit1")
+            st.rerun()
+
+st.markdown("""
+<small>
+<b>URL:</b> <code>?row=1</code> (1 = first data row) •
+<code>&mode=edit1</code> A–K + L–Q form → submit → inline V form → final view (no extra GET/rerun)
+</small>
+""", unsafe_allow_html=True)
