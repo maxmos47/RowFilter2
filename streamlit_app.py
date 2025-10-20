@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 from typing import Dict, List
 
-st.set_page_config(page_title="Row Dashboard (L–Q & V workflow)", page_icon="🩺", layout="centered")
+st.set_page_config(page_title="Patient Dashboard", page_icon="🩺", layout="centered")
 
 # =========================
 # CONFIG: GAS Web App URL
@@ -112,7 +112,7 @@ def render_kv_grid(df_one_row: pd.DataFrame, title: str = "", cols: int = 2):
 # =========================
 # Main UI
 # =========================
-st.markdown("### 🩺 Row Dashboard — L–Q → V Workflow")
+st.markdown("### 🩺 Patient Information")
 
 if not GAS_WEBAPP_URL:
     st.error("Missing GAS web app URL. Add to secrets:\n\n[gas]\nwebapp_url = \"https://script.google.com/macros/s/XXX/exec\"")
@@ -156,7 +156,7 @@ current_V = data.get("current_V", "")
 # =========================
 if mode == "view":
     # Final view: A-C, R-V (no form)
-    render_kv_grid(df_AC_RV, title="Selected Row (A–C, R–V)", cols=2)
+    render_kv_grid(df_AC_RV, title="Patient", cols=2)
     st.success("Final view (no form).")
     if st.button("Edit again (L–Q)"):
         set_query_params(row=str(row), mode="edit1")
@@ -164,7 +164,7 @@ if mode == "view":
 
 elif mode == "edit2":
     # After first submit: show A–C, R–U and form for V
-    render_kv_grid(df_AC_RU, title="Selected Row (A–C, R–U)", cols=2)
+    render_kv_grid(df_AC_RU, title="Patient", cols=2)
     st.markdown("#### Set **Column V** (Priority)")
     idx = ALLOWED_V.index(current_V) if current_V in ALLOWED_V else 0
     with st.form("form_v", border=True):
@@ -183,9 +183,9 @@ elif mode == "edit2":
 
 else:
     # edit1 (default): show A–K + form for L–Q (Yes/No checkboxes)
-    render_kv_grid(df_AK, title="Selected Row (A–K)", cols=2)
+    render_kv_grid(df_AK, title="Patient", cols=2)
 
-    st.markdown("#### Set **Columns L–Q** (Yes / No)")
+    st.markdown("#### Treatment")
     # We will show checkboxes in two columns
     l_col, r_col = st.columns(2)
     selections = {}
