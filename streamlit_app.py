@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 from typing import Dict, List
 
-st.set_page_config(page_title="Row Dashboard", page_icon="🩺", layout="centered")
+st.set_page_config(page_title="Patient Dashboard", page_icon="🩺", layout="centered")
 
 # =========================
 # CONFIG: GAS Web App URL
