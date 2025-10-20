@@ -53,7 +53,7 @@ def gas_update_lq(gas_url: str, rownum: int, values_yes_no):
 # --------------- Page setup ---------------
 q_pre = get_query_params()
 LOCKED = str(q_pre.get("lock", "")).lower() in ("1", "true", "yes", "on")
-ALLOW_EDIT_LOCKED = str(q_pre.get("edit", "")).lower() in ("1", "true", "yes", "on")
+DONE = str(q_pre.get("done", "")).lower() in ("1", "true", "yes", "on")
 
 st.set_page_config(page_title="Patient data", layout="centered", initial_sidebar_state=("collapsed" if LOCKED else "auto"))
 
@@ -180,13 +180,12 @@ def render_cards(ordered_cols):
 
 # ---------------- Locked (read-only) view ----------------
 if LOCKED:
-    # Show ONLY the dashboard for this row.
+    # Show dashboard for this row.
     render_cards(ordered_cols)
 
-    # Treatment editor in locked mode is hidden by default.
-    # Re-enable by adding ?edit=1 to URL when you want to allow edits.
-    if ALLOW_EDIT_LOCKED:
-        with st.expander("Treatment", expanded=False):
+    # If not DONE, show Treatment editor (expanded by default)
+    if not DONE:
+        with st.expander("Treatment", expanded=True):
             lq_cols_locked = list(df.columns[11:17])  # L..Q
             if len(lq_cols_locked) < 6:
                 st.info("ตารางนี้มีคอลัมน์ไม่ถึง Q — จะแสดงเท่าที่มี")
@@ -218,9 +217,8 @@ if LOCKED:
                     values_to_write = list(edits) + [""] * (6 - len(edits))
                     _ = gas_update_lq(gas_url, rownum=sheet_rownum, values_yes_no=values_to_write[:6])
                     st.success("บันทึกข้อมูลเรียบร้อย")
-                    # After submit: stay locked and HIDE editor (no edit=1)
-                    params = {**q_pre, "lock": "1", "row": str(selected_idx + 1), "sheet": sheet_csv}
-                    params.pop("edit", None)
+                    # After submit: show dashboard-only by marking done=1
+                    params = {**q_pre, "lock": "1", "row": str(selected_idx + 1), "sheet": sheet_csv, "done": "1"}
                     set_query_params(**params)
                     st.rerun()
                 except Exception as e:
@@ -255,9 +253,8 @@ if submitted:
         values_to_write = list(current_vals) + [""] * (6 - len(current_vals))
         _ = gas_update_lq(gas_url, rownum=sheet_rownum, values_yes_no=values_to_write[:6])
         st.success("บันทึกข้อมูลเรียบร้อย → แสดงแดชบอร์ดเฉพาะแถวนี้")
-        # After submit: lock view and HIDE editor (no edit=1)
-        params = {**q_pre, "lock": "1", "row": str(selected_idx + 1), "sheet": sheet_csv}
-        params.pop("edit", None)
+        # After submit: lock view and hide editor using done=1
+        params = {**q_pre, "lock": "1", "row": str(selected_idx + 1), "sheet": sheet_csv, "done": "1"}
         set_query_params(**params)
         st.rerun()
     except Exception as e:
