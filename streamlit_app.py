@@ -84,10 +84,7 @@ st.markdown(
 st.subheader("Patient data")
 
 # --- Determine data source & GAS URL ---
-if LOCKED:
-    sheet_csv = DEFAULT_SHEET_CSV
-else:
-    sheet_csv = q_pre.get("sheet") or DEFAULT_SHEET_CSV
+sheet_csv = q_pre.get("sheet") or DEFAULT_SHEET_CSV
 
 gas_url = st.secrets.get("gas_url") or q_pre.get("gas")
 
@@ -222,7 +219,7 @@ if LOCKED:
                     _ = gas_update_lq(gas_url, rownum=sheet_rownum, values_yes_no=values_to_write[:6])
                     st.success("บันทึกข้อมูลเรียบร้อย")
                     # After submit: stay locked and HIDE editor (no edit=1)
-                    params = {**q_pre, "lock": "1"}
+                    params = {**q_pre, "lock": "1", "row": str(selected_idx + 1), "sheet": sheet_csv}
                     params.pop("edit", None)
                     set_query_params(**params)
                     st.rerun()
@@ -259,7 +256,7 @@ if submitted:
         _ = gas_update_lq(gas_url, rownum=sheet_rownum, values_yes_no=values_to_write[:6])
         st.success("บันทึกข้อมูลเรียบร้อย → แสดงแดชบอร์ดเฉพาะแถวนี้")
         # After submit: lock view and HIDE editor (no edit=1)
-        params = {**q_pre, "lock": "1"}
+        params = {**q_pre, "lock": "1", "row": str(selected_idx + 1), "sheet": sheet_csv}
         params.pop("edit", None)
         set_query_params(**params)
         st.rerun()
