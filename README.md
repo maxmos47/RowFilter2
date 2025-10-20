@@ -1,32 +1,23 @@
 
-# Patient Data (Yes/No Form + Dashboard)
+# Patient Treatment Dashboard (A–K before, A–C + L–R after Submit)
 
-This Streamlit app allows editing columns (L, M, N) as Yes/No, then reloads to show the updated row only (dashboard view).
-
-## Files
-- `streamlit_app.py` — Streamlit form and dashboard
-- `apps_script_webapp.gs` — Apps Script Web App for updating Sheet
-- `requirements.txt` — dependencies
+## Overview
+- Before submit: show columns A–K and form “Patient treatment” (Yes/No for L/M/N)
+- After submit: reload and show dashboard (A–C + L–R)
 
 ## Setup
-1. Deploy the Apps Script as a Web App (`apps_script_webapp.gs`):
-   - Execute as: Me
-   - Access: Anyone with the link
-   - Copy the `/exec` URL.
-
-2. Create `.streamlit/secrets.toml` with:
+1. Deploy the Apps Script (apps_script_webapp.gs) as Web App → copy /exec URL.
+2. Create `.streamlit/secrets.toml`:
    ```toml
    SUBMIT_ENDPOINT = "https://script.google.com/macros/s/XXXX/exec"
    SUBMIT_SECRET = "CHANGE_THIS_SECRET"
    TARGET_GID = "0"
    ```
-
-3. Run locally:
+3. Run:
    ```bash
    pip install -r requirements.txt
    streamlit run streamlit_app.py
    ```
-
-## Usage
-- Edit row 5 → open `?row=5`
-- Select Yes/No → Submit → auto reload → `?row=5&lock=1&view=dashboard`
+4. Open:
+   - Edit mode: `?row=5`
+   - Dashboard: auto reload → `?row=5&lock=1&view=dashboard`
