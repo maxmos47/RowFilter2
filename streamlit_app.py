@@ -1,37 +1,19 @@
 # Patient Data — Edit L–Q with Yes/No, then lock
 # -------------------------------------------------
-# What this does
-# • Shows a mobile‑first one‑row dashboard.
-# • When unlocked (lock≠1), it shows a small preview (Cols A–K) and a form
-#   to toggle Columns L–Q to Yes/No.
-# • On Submit, it writes the changes back to Google Sheets (via gspread)
-#   and then reloads in locked mode (lock=1) to show the updated dashboard
-#   WITHOUT the form.
+# Changes requested:
+# • Remove the "ข้อมูลสรุป (Cols A–K)" preview block.
+# • Rename edit form/expander title from "แก้ไขคอลัมน์ L–Q เป็น Yes/No" to "Treatment".
+#
+# What this app does
+# • Shows a mobile-first dashboard of a selected row.
+# • Supports editing Columns L–Q (Yes/No) either in unlocked mode via a form,
+#   or in locked mode via an expander called "Treatment".
+# • On Submit, writes back to Google Sheets via gspread, then reloads in lock mode.
 #
 # Requirements
-# 1) In your Streamlit Cloud project, add to requirements.txt:
-#       gspread>=6.0.0
-#       google-auth>=2.0.0
-# 2) Put a Google Service Account in st.secrets as `gcp_service_account` (JSON).
-#    Example (secrets.toml):
-#       [gcp_service_account]
-#       type = "service_account"
-#       project_id = "..."
-#       private_key_id = "..."
-#       private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-#       client_email = "...@...gserviceaccount.com"
-#       client_id = "..."
-#       token_uri = "https://oauth2.googleapis.com/token"
-# 3) Share your Google Sheet with the service account email (Editor).
+#   - See requirements.txt generated alongside this file.
 #
-# How to pass the sheet
-# • Default CSV comes from DEFAULT_SHEET_CSV (edit below), OR
-# • Use query params: ?sheet=<csv_export_url>&row=1  (or use ?id=&id_col=)
-# • If you pass ?sid=<sheetId>&gid=<worksheetGid>, writes go directly to that tab.
-#   (Otherwise we attempt to parse sid/gid from the CSV URL.)
-
 import re
-import io
 import pandas as pd
 import streamlit as st
 
@@ -54,7 +36,6 @@ def get_query_params() -> dict:
         # Legacy fallback
         return {k: v[0] if isinstance(v, list) else v for k, v in st.experimental_get_query_params().items()}
 
-
 def set_query_params(**kwargs):
     # Compatibility for old/new Streamlit
     try:
@@ -62,26 +43,22 @@ def set_query_params(**kwargs):
     except Exception:
         st.experimental_set_query_params(**{**get_query_params(), **kwargs})
 
-
 def coerce_int(x, default=None):
     try:
         return int(str(x))
     except Exception:
         return default
 
-
 def looks_like_image_url(x: str) -> bool:
     if not isinstance(x, str):
         return False
     return bool(re.search(r"\.(png|jpg|jpeg|gif|webp)(\?.*)?$", x, re.IGNORECASE))
-
 
 @st.cache_data(show_spinner=False, ttl=300)
 def load_csv(url: str) -> pd.DataFrame:
     df = pd.read_csv(url)
     df.columns = [str(c) for c in df.columns]
     return df
-
 
 def parse_sid_gid_from_csv_url(csv_url: str):
     """Try to pull sheetId (sid) and gid from a Google Sheets CSV export URL."""
@@ -90,7 +67,6 @@ def parse_sid_gid_from_csv_url(csv_url: str):
     mg = re.search(r"[?&]gid=(\d+)", csv_url)
     gid = mg.group(1) if mg else None
     return sid, gid
-
 
 def gspread_client_from_secrets():
     if not HAS_GSPREAD:
@@ -105,7 +81,6 @@ def gspread_client_from_secrets():
     creds = Credentials.from_service_account_info(svc, scopes=scopes)
     return gspread.authorize(creds)
 
-
 def write_L_to_Q(sid: str, gid: int, rownum: int, values_yes_no):
     """Write 6 Yes/No values into Columns L–Q in the given 1-based row number.
     values_yes_no: list[str] length 6
@@ -119,7 +94,6 @@ def write_L_to_Q(sid: str, gid: int, rownum: int, values_yes_no):
     col_start, col_end = "L", "Q"
     rng = f"{col_start}{rownum}:{col_end}{rownum}"
     ws.update(rng, [values_yes_no])
-
 
 # --------------- Page setup ---------------
 q_pre = get_query_params()
@@ -223,12 +197,10 @@ priority = [c for c in ["HN","PatientID","Name","FullName","Triage","TriageScore
 others = [c for c in df.columns if c not in priority]
 ordered_cols = priority + others
 
-
 def escape_html(s: str) -> str:
     return (s.replace("&","&amp;")
              .replace("<","&lt;")
              .replace(">","&gt;"))
-
 
 def render_cards(ordered_cols):
     cards = []
@@ -249,14 +221,12 @@ def render_cards(ordered_cols):
     st.markdown(grid_html, unsafe_allow_html=True)
     st.markdown(f"<div class='small-cap'>Showing row {selected_idx+1} of {len(df)}</div>", unsafe_allow_html=True)
 
-
-# ---------------- Locked (read-only) view ----------------
+# ---------------- Locked (read-only) view WITH inline edit ----------------
 if LOCKED:
     render_cards(ordered_cols)
 
-    # --- Allow inline editing (L–Q) even in locked mode ---
-    with st.expander("แก้ไขคอลัมน์ L–Q (Yes/No)", expanded=False):
-        # Recompute the L..Q slice for safety
+    # --- Inline editing (L–Q) in locked mode ---
+    with st.expander("Treatment", expanded=False):
         lq_cols_locked = list(df.columns[11:17])  # L..Q
         if len(lq_cols_locked) < 6:
             st.info("ตารางนี้มีคอลัมน์ไม่ถึง Q — จะแสดงเท่าที่มี")
@@ -279,7 +249,6 @@ if LOCKED:
             submit_locked = st.form_submit_button("Submit (บันทึกการเปลี่ยนแปลง)")
 
         if submit_locked:
-            # Need sid/gid to write back
             sid_l = q_pre.get("sid")
             gid_l = q_pre.get("gid")
             if (not sid_l) or (not gid_l):
@@ -298,7 +267,6 @@ if LOCKED:
                 values_to_write = list(edits) + [""] * (6 - len(edits))
                 write_L_to_Q(sid=sid_l, gid=int(gid_l), rownum=sheet_rownum, values_yes_no=values_to_write[:6])
                 st.success("บันทึกข้อมูลเรียบร้อย")
-                # stay locked and hide editor after refresh
                 set_query_params(**{**q_pre, "lock": "1"})
                 st.rerun()
             except Exception as e:
@@ -306,34 +274,24 @@ if LOCKED:
 
     st.stop()
 
-# ---------------- Unlocked: Preview A–K, then Form for L–Q ----------------
-# Preview: only columns A–K if available
-ak_cols = list(df.columns[:11])  # A..K are first 11 columns
-st.markdown("**ข้อมูลสรุป (Cols A–K)**")
-preview_dict = {c: ("" if pd.isna(row[c]) else row[c]) for c in ak_cols}
-st.dataframe(pd.DataFrame([preview_dict]), hide_index=True, use_container_width=True)
-
-# Form: toggle L–Q
+# ---------------- Unlocked: DIRECT Treatment Form (no A–K preview) --------
 lq_cols = list(df.columns[11:17])  # L..Q are columns 12..17 (0-based 11..16)
 if len(lq_cols) < 6:
     st.info("ตารางนี้มีคอลัมน์ไม่ถึง Q — จะแสดงเท่าที่มี")
 
 with st.form("edit_lq_form", clear_on_submit=False):
-    st.markdown("### แก้ไขคอลัมน์ L–Q เป็น Yes/No")
+    st.markdown("### Treatment")
     yes_no_options = ("Yes", "No")
     current_vals = []
-    widgets = []
     for i, c in enumerate(lq_cols):
         raw = row[c]
         default = "Yes" if str(raw).strip().lower() == "yes" else "No"
         sel = st.selectbox(f"{c} (Col {chr(76+i)})", yes_no_options, index=0 if default=="Yes" else 1, key=f"lq_{i}")
-        widgets.append(sel)
         current_vals.append(sel)
 
     submitted = st.form_submit_button("Submit (บันทึกการเปลี่ยนแปลง)")
 
 if submitted:
-    # Determine where to write: prefer explicit sid/gid; otherwise parse from CSV URL
     sid = q_pre.get("sid")
     gid = q_pre.get("gid")
     if (not sid) or (not gid):
@@ -348,19 +306,16 @@ if submitted:
     try:
         if not HAS_GSPREAD:
             raise RuntimeError("ไม่พบไลบรารี gspread โปรดเพิ่มใน requirements.txt")
-        # Google Sheets rows are 1-based and include header row. DataFrame row 0 => sheet row 2
         sheet_rownum = selected_idx + 2
-        # Ensure exactly 6 values for L..Q; if fewer columns, still write a 6‑wide range (allowed by Sheets)
         values_to_write = list(current_vals) + [""] * (6 - len(current_vals))
         write_L_to_Q(sid=sid, gid=int(gid), rownum=sheet_rownum, values_yes_no=values_to_write[:6])
         st.success("บันทึกข้อมูลเรียบร้อย → กำลังโหลดแดชบอร์ดแบบล็อก")
-        # Flip to locked mode so the form disappears
         set_query_params(**{**q_pre, "lock": "1"})
         st.rerun()
     except Exception as e:
         st.error(f"บันทึกไม่สำเร็จ: {e}")
 
-# If not submitted, still render full cards below the form so user can see everything
+# After form (not submitted), show full cards for reference
 st.markdown("---")
-st.markdown("**แสดงข้อมูลทั้งหมด (ก่อนบันทึก)**")
+st.markdown("**ข้อมูลทั้งหมดของแถวนี้**")
 render_cards(ordered_cols)
