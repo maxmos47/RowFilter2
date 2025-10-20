@@ -1,31 +1,32 @@
 
-# Edit Columns L/M/N via Form → Show Updated Row
+# Patient Data (Yes/No Form + Dashboard)
 
-A Streamlit + Google Apps Script setup to edit columns L, M, and N in your Google Sheet, then display the updated row as a dashboard.
+This Streamlit app allows editing columns (L, M, N) as Yes/No, then reloads to show the updated row only (dashboard view).
 
 ## Files
-- `streamlit_app.py` — Streamlit app (form + display)
-- `apps_script_webapp.gs` — Apps Script Web App to update the sheet
-- `requirements.txt` — dependencies (`streamlit`, `pandas`, `requests`)
+- `streamlit_app.py` — Streamlit form and dashboard
+- `apps_script_webapp.gs` — Apps Script Web App for updating Sheet
+- `requirements.txt` — dependencies
 
 ## Setup
-1. Deploy the Google Apps Script (`apps_script_webapp.gs`) as a Web App.
-   - Execute as: **Me**
-   - Who has access: **Anyone with the link**
-   - Copy the Web App URL (ends with `/exec`).
-2. Set `.streamlit/secrets.toml`:
+1. Deploy the Apps Script as a Web App (`apps_script_webapp.gs`):
+   - Execute as: Me
+   - Access: Anyone with the link
+   - Copy the `/exec` URL.
+
+2. Create `.streamlit/secrets.toml` with:
    ```toml
-   SUBMIT_ENDPOINT = "https://script.google.com/macros/s/XXXXXX/exec"
+   SUBMIT_ENDPOINT = "https://script.google.com/macros/s/XXXX/exec"
    SUBMIT_SECRET = "CHANGE_THIS_SECRET"
    TARGET_GID = "0"
    ```
-3. Run the app:
+
+3. Run locally:
    ```bash
    pip install -r requirements.txt
    streamlit run streamlit_app.py
    ```
 
 ## Usage
-- Edit by row: `?row=5`
-- Or by ID: `?id=ABC&id_col=HN`
-- Adjust L/M/N → Submit → App updates sheet via Apps Script → Refreshes and displays the full updated row.
+- Edit row 5 → open `?row=5`
+- Select Yes/No → Submit → auto reload → `?row=5&lock=1&view=dashboard`
